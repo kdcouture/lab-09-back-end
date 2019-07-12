@@ -60,4 +60,4 @@ Start time: __9:30am__
 
 Finish time: __11:55am__
 
-Actual time needed to complete: __2:25__
+Actual time needed to complete: __3:25__
