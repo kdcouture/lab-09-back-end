@@ -1,4 +1,4 @@
-'use strict';
+console.log();'use strict';
 
 // Application Dependencies
 const express = require('express');
@@ -24,6 +24,8 @@ client.on('error', err => console.error(err));
 app.get('/location', getLocation);
 app.get('/weather', getWeather);
 app.get('/events', getEvents);
+app.get('/movies', getMovies);
+app.get('/yelp', getYelps);
 
 // Make sure the server is listening for requests
 app.listen(PORT, () => console.log(`Listening on ${PORT}`));
@@ -58,6 +60,7 @@ function Location(query, res) {
   this.formatted_query = res.body.results[0].formatted_address;
   this.latitude = res.body.results[0].geometry.location.lat;
   this.longitude = res.body.results[0].geometry.location.lng;
+  this.created_at = Date.now();
 }
 
 Location.lookupLocation = (location) => {
@@ -67,6 +70,7 @@ Location.lookupLocation = (location) => {
   return client.query(SQL, values)
     .then(result => {
       if (result.rowCount > 0) {
+        console.log('getting from db');
         location.cacheHit(result);
       } else {
         location.cacheMiss();
@@ -77,8 +81,9 @@ Location.lookupLocation = (location) => {
 
 Location.prototype = {
   save: function () {
-    const SQL = 'INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING id;';
-    const values = [this.search_query, this.formatted_query, this.latitude, this.longitude];
+    const timeStamp = this.created_at;
+    const SQL = 'INSERT INTO locations (search_query, formatted_query, latitude, longitude, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING RETURNING id;';
+    const values = [this.search_query, this.formatted_query, this.latitude, this.longitude, timeStamp];
 
     return client.query(SQL, values)
       .then(result => {
@@ -92,6 +97,7 @@ function Weather(day) {
   this.tableName = 'weathers';
   this.forecast = day.summary;
   this.time = new Date(day.time * 1000).toString().slice(0, 15);
+  this.created_at = Date.now();
 }
 
 Weather.tableName = 'weathers';
@@ -99,12 +105,14 @@ Weather.lookup = lookup;
 
 Weather.prototype = {
   save: function (location_id) {
-    const SQL = `INSERT INTO ${this.tableName} (forecast, time, location_id) VALUES ($1, $2, $3);`;
-    const values = [this.forecast, this.time, location_id];
+    const timeStamp = this.created_at;
+    const SQL = `INSERT INTO ${this.tableName} (forecast, time, created_at, location_id) VALUES ($1, $2, $3, $4);`;
+    const values = [this.forecast, this.time, timeStamp, location_id];
 
     client.query(SQL, values);
   }
 };
+
 
 function Event(event) {
   this.tableName = 'events';
@@ -112,6 +120,7 @@ function Event(event) {
   this.name = event.name.text;
   this.event_date = new Date(event.start.local).toString().slice(0, 15);
   this.summary = event.summary;
+  this.created_at = Date.now();
 }
 
 Event.tableName = 'events';
@@ -119,12 +128,62 @@ Event.lookup = lookup;
 
 Event.prototype = {
   save: function (location_id) {
-    const SQL = `INSERT INTO ${this.tableName} (link, name, event_date, summary, location_id) VALUES ($1, $2, $3, $4, $5);`;
-    const values = [this.link, this.name, this.event_date, this.summary, location_id];
+    const timeStamp = this.created_at;
+    const SQL = `INSERT INTO ${this.tableName} (link, name, event_date, summary, created_at, location_id) VALUES ($1, $2, $3, $4, $5, $6);`;
+    const values = [this.link, this.name, this.event_date, this.summary, timeStamp,location_id];
 
     client.query(SQL, values);
   }
 };
+
+function Movie(movie){
+  this.tableName = 'movies';
+  this.title = movie.title;
+  this.overview = movie.overview;
+  this.average_votes = movie.vote_average;
+  this.total_votes = movie.vote_count;
+  this.image_url = `https://image.tmdb.org/t/p/w200${movie.poster_path}`;
+  this.popularity = movie.popularity;
+  this.released_on = movie.release_date;
+  this.created_at = Date.now();
+}
+
+Movie.tableName = 'movies';
+Movie.lookup = lookup;
+
+Movie.prototype = {
+  save: function (location_id) {
+    const timeStamp = this.created_at;
+    const SQL = `INSERT INTO ${this.tableName} (title, overview, average_votes, total_votes, img_url, popularity, released_on, created_at, location_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`;
+    const values = [this.title, this.overview, this.average_votes, this.total_votes, this.image_url, this.popularity, this.released_on, timeStamp, location_id];
+
+    client.query(SQL, values);
+  }
+};
+
+function Yelp(yelp){
+  this.tableName = 'yelp';
+  this.name = yelp.name;
+  this.image_url = yelp.image_url;
+  this.price = yelp.price;
+  this.rating = yelp.rating;
+  this.url = yelp.url;
+  this.created_at = Date.now();
+}
+
+Yelp.tableName = 'yelp';
+Yelp.lookup = lookup;
+
+Yelp.prototype = {
+  save: function (location_id) {
+    const timeStamp = this.created_at;
+    const SQL = `INSERT INTO ${this.tableName} (name, image_url, price, rating, url, created_at, location_id) VALUES ($1, $2, $3, $4, $5, $6, $7);`;
+    const values = [this.name, this.image_url, this.price, this.rating, this.url, timeStamp, location_id];
+
+    client.query(SQL, values);
+  }
+};
+
 
 function getLocation(request, response) {
   Location.lookupLocation({
@@ -133,7 +192,18 @@ function getLocation(request, response) {
     query: request.query.data,
 
     cacheHit: function (result) {
-      response.send(result.rows[0]);
+      if ((Date.now() - result.rows[0].created_at) > 15770000000000){
+        const SQL = 'DELETE FROM locations WHERE id=$1';
+        const values = [result.rows[0].id];
+
+        client.query(SQL, values)
+          .then(()=>{
+            this.cacheMiss();
+          });
+
+      } else {
+        response.send(result.rows[0]);
+      }
     },
 
     cacheMiss: function () {
@@ -157,7 +227,20 @@ function getWeather(request, response) {
     location: request.query.data.id,
 
     cacheHit: function (result) {
-      response.send(result.rows);
+      if ((Date.now() - result.rows[0].created_at) > 10000){
+        const SQL = 'DELETE FROM weathers WHERE location_id=$1;';
+
+        const values = [result.rows[0].location_id];
+        console.log('result.rows[0]: ', result.rows[0]);
+
+        client.query(SQL, values)
+          .then(()=>{
+            this.cacheMiss();
+          });
+
+      } else {
+        response.send(result.rows);
+      }
     },
 
     cacheMiss: function () {
@@ -184,7 +267,17 @@ function getEvents(request, response) {
     location: request.query.data.id,
 
     cacheHit: function (result) {
-      response.send(result.rows);
+      if ((Date.now() - result.rows[0].created_at) > 8640000000){
+        const SQL = 'DELETE FROM events WHERE location_id=$1;';
+        const values = [result.rows[0].location_id];
+
+        client.query(SQL, values)
+          .then(()=>{
+            this.cacheMiss();
+          });
+      } else {
+        response.send(result.rows);
+      }
     },
 
     cacheMiss: function () {
@@ -199,6 +292,81 @@ function getEvents(request, response) {
           });
 
           response.send(events);
+        })
+        .catch(error => handleError(error, response));
+    }
+  });
+}
+
+function getMovies(request, response) {
+  Movie.lookup({
+    tableName: Movie.tableName,
+    location: request.query.data.id,
+    query: request.query.data.formatted_query.split(' ')[0],
+    cacheHit: function (result) {
+      if ((Date.now() - result.rows[0].created_at) > 15770000000000){
+        const SQL = 'DELETE FROM movies WHERE location_id=$1;';
+        const values = [result.rows[0].location_id];
+
+        client.query(SQL, values)
+          .then(()=>{
+            this.cacheMiss();
+          });
+      } else {
+        response.send(result.rows);
+      }
+    },
+
+    cacheMiss: function() {
+      const url = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&query=${this.query}`;
+
+      superagent.get(url)
+        .then(result => {
+          const movies = result.body.results.map(movieData => {
+            const movie = new Movie(movieData);
+            movie.save(request.query.data.id);
+            return movie;
+          });
+
+          response.send(movies);
+        })
+        .catch(error => handleError(error, response));
+    }
+  });
+}
+
+function getYelps(request, response) {
+  Yelp.lookup({
+    tableName: Yelp.tableName,
+    location: request.query.data.id,
+    cacheHit: function (result) {
+      if ((Date.now() - result.rows[0].created_at) > 15770000){
+        const SQL = 'DELETE FROM yelp WHERE location_id=$1;';
+
+        const values = [result.rows[0].location_id];
+
+        client.query(SQL, values)
+          .then(()=>{
+            this.cacheMiss();
+          });
+      } else {
+        response.send(result.rows);
+      }
+    },
+
+    cacheMiss: function() {
+      const url = `https://api.yelp.com/v3/businesses/search?term=delis&latitude=${request.query.data.latitude}&longitude=${request.query.data.longitude}`;
+      const authVal = `Bearer ${process.env.YELP_API_KEY}`;
+
+      superagent.get(url).set('Authorization', authVal)
+        .then(result => {
+          const yelps = result.body.businesses.map(yelpData => {
+            const yelp = new Yelp(yelpData);
+            yelp.save(request.query.data.id);
+            return yelp;
+          });
+
+          response.send(yelps);
         })
         .catch(error => handleError(error, response));
     }
